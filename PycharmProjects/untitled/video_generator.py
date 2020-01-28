@@ -1,0 +1,155 @@
+import numpy as np
+import os
+import six.moves.urllib as urllib
+import sys
+import tarfile
+import tensorflow as tf
+import zipfile
+from collections import defaultdict
+from io import StringIO
+from matplotlib import pyplot as plt
+from PIL import Image
+
+from utils import visualization_utils as vis_util
+import cv2
+from utils import label_map_util
+from os import listdir
+from os.path import isfile, join
+
+os.chdir('Y:/boiler')
+curr_dir = os.getcwd()
+
+
+
+def load_model(model_name):
+
+    model_path = os.path.normpath(os.path.join(curr_dir, model_name))
+    detection_graph = tf.Graph()
+    with detection_graph.as_default():
+        od_graph_def = tf.GraphDef()
+        with tf.gfile.GFile(
+                model_path,
+                'rb') as fid:
+            serialized_graph = fid.read()
+            od_graph_def.ParseFromString(serialized_graph)
+            tf.import_graph_def(od_graph_def, name='')
+            print("loading model:{}".format(model_name))
+    return detection_graph
+
+
+def load_video(input_video_name):
+
+    input_video_path = os.path.join(curr_dir, input_video_name)
+
+    # Playing video from file
+    cap = cv2.VideoCapture(input_video_path)
+
+    # Default resolutions of the frame are obtained.The default resolutions are system dependent.
+    # We convert the resolutions from float to integer.
+    frame_width = int(cap.get(3))
+    frame_height = int(cap.get(4))
+
+    print("returning cap, frame_width, frame_height")
+    return cap, frame_width, frame_height
+
+
+def create_video(frame_width, frame_height, output_video_name):
+
+    output_video_path = os.path.join(curr_dir, output_video_name)
+
+    # Checks and deletes the output file
+    # You cant have a existing file or it will through an error
+    if os.path.isfile(output_video_path):
+        os.remove(output_video_path)
+
+    # Define the codec and create VideoWriter object.The output is stored in 'output.avi' file.
+    out = cv2.VideoWriter(output_video_path, cv2.VideoWriter_fourcc('M', 'J', 'P', 'G'),
+                          10, (frame_width, frame_height))
+
+    print("returning out")
+    return out
+
+def run_detection(cap, out, category_index, detection_graph, threshold):
+    with detection_graph.as_default():
+        with tf.Session(graph=detection_graph) as sess:
+            # Definite input and output Tensors for detection_graph
+            image_tensor = detection_graph.get_tensor_by_name('image_tensor:0')
+            # Each box represents a part of the image where a particular object was detected.
+            detection_boxes = detection_graph.get_tensor_by_name('detection_boxes:0')
+            # Each score represent how level of confidence for each of the objects.
+            # Score is shown on the result image, together with the class label.
+            detection_scores = detection_graph.get_tensor_by_name('detection_scores:0')
+            detection_classes = detection_graph.get_tensor_by_name('detection_classes:0')
+            num_detections = detection_graph.get_tensor_by_name('num_detections:0')
+            while (cap.isOpened()):
+                # Capture frame-by-frame
+                ret, frame = cap.read()
+
+                # Expand dimensions since the model expects images to have shape: [1, None, None, 3]
+                image_np_expanded = np.expand_dims(frame, axis=0)
+                print("/n outputing video....")
+                # Actual detection.
+                (boxes, scores, classes, num) = sess.run(
+                    [detection_boxes, detection_scores, detection_classes, num_detections],
+                    feed_dict={image_tensor: image_np_expanded})
+
+                # Visualization of the results of a detection.
+                vis_util.visualize_boxes_and_labels_on_image_array(
+                    frame,
+                    np.squeeze(boxes),
+                    np.squeeze(classes).astype(np.int32),
+                    np.squeeze(scores),
+                    category_index,
+                    use_normalized_coordinates=True,
+                    line_thickness=5,
+                    min_score_thresh= threshold)
+
+                if ret == True:
+                    # Saves for video
+                    out.write(frame)
+
+                    # Display the resulting frame
+                    cv2.imshow('Boiler Detection', frame)
+
+                    # Close window when "Q" button pressed
+                    if cv2.waitKey(1) & 0xFF == ord('q'):
+                        break
+                else:
+                    break
+
+            # When everything done, release the video capture and video write objects
+            cap.release()
+            out.release()
+            cv2.destroyAllWindows()
+
+
+
+def set_cat_index(num_class, label_map_name):
+    label_map_path = os.path.normpath(os.path.join(curr_dir, label_map_name))
+    label_map = label_map_util.load_labelmap(label_map_path)
+    categories = label_map_util.convert_label_map_to_categories(label_map, max_num_classes=num_class, use_display_name=True)
+    category_index = label_map_util.create_category_index(categories)
+
+    print("returning category_index")
+    return category_index
+
+
+if __name__ == "__main__":
+    detection_graph = load_model('frozen_inference_graph.pb')
+
+    cap, frame_width, frame_height = load_video('166_0010.MOV')
+
+    out = create_video(frame_width, frame_height, 'detection_video.avi')
+
+    category_index = set_cat_index(1, 'pascal_label_map.pbtxt')
+
+    run_detection(cap, out, category_index, detection_graph, 0.6)
+
+
+
+
+
+
+
+
+
